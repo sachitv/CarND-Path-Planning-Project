@@ -17,10 +17,17 @@ S_PlannerResult Planner::GetPath( T_MapPoints const &map_waypoints_x, T_MapPoint
 {
 	S_PlannerResult retVal;
 
-	double const dist_inc = MPH2MS * 49 * 0.02; // 50 MPH speed in 0.02 sec intervals
+//	double dist_inc = 0.5;
+//	for(int i = 0; i < 50; i++)
+//	{
+//		retVal.m_X.push_back(m_Car_x+(dist_inc*i)*cos(deg2rad(m_Car_yaw)));
+//		retVal.m_Y.push_back(m_Car_y+(dist_inc*i)*sin(deg2rad(m_Car_yaw)));
+//	}
+
+	double const dist_inc = MPH2MS * 50 * 0.02; // 50 MPH speed in 0.02 sec intervals
 	for ( int i = 0; i < 50; i++ )
 	{
-		double const nextS = m_Car_s + dist_inc;
+		double const nextS = m_Car_s + (dist_inc * i);
 		double const nextD = m_Car_d;
 		auto const XY = getXY( nextS, nextD, map_waypoints_s, map_waypoints_x, map_waypoints_y );
 		retVal.m_X.emplace_back( XY[ 0 ] );
@@ -59,28 +66,28 @@ S_PlannerResult Planner::GetPath( T_MapPoints const &map_waypoints_x, T_MapPoint
 //	}
 
 
-	T_JMTParams start{m_Car_s, m_Car_speed * MPH2MS, m_Car_acceleration * MPH2MS};
-	T_JMTParams end{m_Car_s + 200.f, 50.f * MPH2MS, 0.0};
-	double const T(10);
-
-	auto const &PolynomialParameters = JMT( start, end, T );
-
-	for ( int i = 0; i < 50; i++ )
-	{
-		double const deltaTime = i * 0.02;
-		double const nextS = PolynomialParameters[ 0 ] +
-		                     PolynomialParameters[ 1 ] * deltaTime +
-		                     PolynomialParameters[ 2 ] * pow( deltaTime, 2 ) +
-		                     PolynomialParameters[ 3 ] * pow( deltaTime, 3 ) +
-		                     PolynomialParameters[ 4 ] * pow( deltaTime, 4 ) +
-		                     PolynomialParameters[ 5 ] * pow( deltaTime, 5 );
-		double const nextD = m_Car_d;
-		auto const XY = getXY( nextS, nextD, map_waypoints_s, map_waypoints_x, map_waypoints_y );
-		retVal.m_X.emplace_back( XY[ 0 ] );
-		retVal.m_Y.emplace_back( XY[ 1 ] );
-	}
-
-
+//	T_JMTParams start{m_Car_s, m_Car_speed * MPH2MS, m_Car_acceleration * MPH2MS};
+//	T_JMTParams end{m_Car_s + 200.f, 50.f * MPH2MS, 0.0};
+//	double const T(10);
+//
+//	auto const &PolynomialParameters = JMT( start, end, T );
+//
+//	for ( int i = 0; i < 50; i++ )
+//	{
+//		double const deltaTime = i * 0.02;
+//		double const nextS = PolynomialParameters[ 0 ] +
+//		                     PolynomialParameters[ 1 ] * deltaTime +
+//		                     PolynomialParameters[ 2 ] * pow( deltaTime, 2 ) +
+//		                     PolynomialParameters[ 3 ] * pow( deltaTime, 3 ) +
+//		                     PolynomialParameters[ 4 ] * pow( deltaTime, 4 ) +
+//		                     PolynomialParameters[ 5 ] * pow( deltaTime, 5 );
+//		double const nextD = m_Car_d;
+//		auto const XY = getXY( nextS, nextD, map_waypoints_s, map_waypoints_x, map_waypoints_y );
+//		retVal.m_X.emplace_back( XY[ 0 ] );
+//		retVal.m_Y.emplace_back( XY[ 1 ] );
+//	}
+//
+//
 	return retVal;
 }
 
