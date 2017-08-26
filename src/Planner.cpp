@@ -9,14 +9,18 @@
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
 #include "Eigen-3.3/Eigen/Dense"
+
 #include <algorithm>
+#include <array>
+#include <vector>
 #include <iostream>
 
 static double const MPH2MS = 1600.f / 3600.f;
 
 static int const LANE = 1;
-static double const REF_VEL = 49.5f * MPH2MS;
+static double const MAX_VEL = 49.5f * MPH2MS;
 static int const MAX_PATH_POINTS = 50;
+static double const TIME_INTERVAL = 0.02;//sec
 
 struct Point
 {
@@ -25,14 +29,16 @@ struct Point
 		x = 0;
 		y = 0;
 	}
-	Point(double const inX, double const inY)
+
+	Point( double const inX, double const inY )
 	{
 		x = inX;
 		y = inY;
 	}
+
 	void print() const
 	{
-		cout<<x<<","<<y<<endl;
+		cout << x << "," << y << endl;
 	}
 
 	double x;
@@ -47,202 +53,190 @@ S_PlannerResult Planner::GetPath( T_MapPoints const &map_waypoints_x, T_MapPoint
 
 	size_t const previous_path_len = m_Previous_path_y.size(); //or x, whatever.
 
+	//Checking other vehicles on the road
+	static double targetSpeed = 0;
+	bool slowDown( false );
+	int const currentCarLane = (m_Car_d) / 4;
+	double minSpeed = MAX_VEL;
+
+	double mainCarPredictedPosition = m_Car_s;
+	if ( previous_path_len > 0 )
+	{
+		auto const lastPoint = getFrenet( m_Previous_path_x.back(), m_Previous_path_y.back(),
+		                                  deg2rad( m_Car_yaw ), map_waypoints_x, map_waypoints_y );
+		mainCarPredictedPosition = lastPoint[ 0 ];
+	}
+
+	for ( auto const &vehicleData : m_Sensor_fusion )
+	{
+		int const thisCarLane = (vehicleData.m_D / 4);
+
+		if ( thisCarLane == currentCarLane )
+		{
+			//Car is in our lane
+
+			double const thisCarS = vehicleData.m_S;
+			double const thisCarSpeed = sqrt( pow( vehicleData.m_Vy, 2 ) + pow( vehicleData.m_Vx, 2 ));
+
+			double const thisCarProjectedDistance = previous_path_len * TIME_INTERVAL * thisCarSpeed;
+
+			double const distance = thisCarS + thisCarProjectedDistance - mainCarPredictedPosition;
+
+			static double const MIN_DIST = 30;
+			if ( distance > 0 && distance < MIN_DIST ) //meters
+			{
+				//This car is ahead of us, slow our speed
+				if ( thisCarSpeed < MAX_VEL )
+				{
+					slowDown = true;
+					minSpeed = min( thisCarSpeed, minSpeed );
+				}
+			}
+		}
+	}
+
+	if ( slowDown && targetSpeed > (minSpeed - 5.0))
+	{
+		targetSpeed -= 0.2 * MPH2MS;
+	}
+	else if ( targetSpeed < MAX_VEL )
+	{
+		targetSpeed += 0.2 * MPH2MS;
+	}
+	targetSpeed = max( 0.0, min( MAX_VEL, targetSpeed ));
 
 	vector<Point> pts;
 
 	Point ref;
 	double ref_yaw;
-	cout<<"num : "<<previous_path_len<<endl;
+	cout << "num : " << previous_path_len << endl;
 
-	if(previous_path_len < 2)
+	if ( previous_path_len < 2 )
 	{
-		ref = Point(m_Car_x, m_Car_y);
-		ref_yaw = deg2rad(m_Car_yaw);
+		ref = Point( m_Car_x, m_Car_y );
+		ref_yaw = deg2rad( m_Car_yaw );
 
 		//If it's almost empty
-		double const prev_x = m_Car_x - cos(ref_yaw);
-		double const prev_y = m_Car_y - sin(ref_yaw);
+		double const prev_x = m_Car_x - cos( ref_yaw );
+		double const prev_y = m_Car_y - sin( ref_yaw );
 
-		Point const prev(prev_x, prev_y);
+		Point const prev( prev_x, prev_y );
 
-		pts.emplace_back(prev);
-		pts.emplace_back(ref);
+		pts.emplace_back( prev );
+		pts.emplace_back( ref );
 
-		cout<<"ref"<<endl;
+		cout << "ref" << endl;
 		ref.print();
-		cout<<"prev"<<endl;
+		cout << "prev" << endl;
 		prev.print();
 	}
 	else
 	{
-		double const prev_x = m_Previous_path_x[previous_path_len - 2];
-		double const prev_y = m_Previous_path_y[previous_path_len - 2];
+		double const prev_x = m_Previous_path_x[ previous_path_len - 2 ];
+		double const prev_y = m_Previous_path_y[ previous_path_len - 2 ];
 
-		Point const prev(prev_x, prev_y);
+		Point const prev( prev_x, prev_y );
 
-		double const ref_x = m_Previous_path_x[previous_path_len - 1];
-		double const ref_y = m_Previous_path_y[previous_path_len - 1];
+		double const ref_x = m_Previous_path_x[ previous_path_len - 1 ];
+		double const ref_y = m_Previous_path_y[ previous_path_len - 1 ];
 
-		ref = Point(ref_x, ref_y);
+		ref = Point( ref_x, ref_y );
 
 		ref_yaw = atan2((ref_y - prev_y), (ref_x - prev_x));
 
-		pts.emplace_back(prev);
-		pts.emplace_back(ref);
+		pts.emplace_back( prev );
+		pts.emplace_back( ref );
 
-		cout<<"ref"<<endl;
+		cout << "ref" << endl;
 		ref.print();
-		cout<<"prev"<<endl;
+		cout << "prev" << endl;
 		prev.print();
 	}
 
-	for(int i = 0; i < 3; ++i)
+	for ( int i = 0; i < 3; ++i )
 	{
 		static int const OFFSET = 30;
-		vector<double> const nextwp = getXY(m_Car_s + (OFFSET * (i+1)), (2+4*LANE), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-		Point const next(nextwp[0], nextwp[1]);
-		pts.emplace_back(next);
+		vector<double> const nextwp = getXY( m_Car_s + (OFFSET * (i + 1)), (2 + 4 * LANE), map_waypoints_s,
+		                                     map_waypoints_x, map_waypoints_y );
+		Point const next( nextwp[ 0 ], nextwp[ 1 ] );
+		pts.emplace_back( next );
 
-		cout<<"next waypoint"<<endl;
+		cout << "next waypoint" << endl;
 		next.print();
 
 	}
 
-	for(int i = 0; i < pts.size(); ++i)
+	for ( int i = 0; i < pts.size(); ++i )
 	{
-		double const shift_x = pts[i].x - ref.x;
-		double const shift_y = pts[i].y - ref.y;
+		double const shift_x = pts[ i ].x - ref.x;
+		double const shift_y = pts[ i ].y - ref.y;
 
-		pts[i].x = (shift_x * cos(-ref_yaw) - shift_y * sin(-ref_yaw));
-		pts[i].y = (shift_x * sin(-ref_yaw) + shift_y * cos(-ref_yaw));
+		pts[ i ].x = (shift_x * cos( -ref_yaw ) - shift_y * sin( -ref_yaw ));
+		pts[ i ].y = (shift_x * sin( -ref_yaw ) + shift_y * cos( -ref_yaw ));
 
 	}
 
 	tk::spline s;
-	sort(pts.begin(), pts.end(), [](Point const& first, Point const& second){
+	sort( pts.begin(), pts.end(), []( Point const &first, Point const &second )
+	{
 		return first.x < second.x;
-	});
+	} );
 
 	{
-		vector<double> ptsx; ptsx.reserve(pts.size());
-		vector<double> ptsy; ptsy.reserve(pts.size());
+		vector<double> ptsx;
+		ptsx.reserve( pts.size());
+		vector<double> ptsy;
+		ptsy.reserve( pts.size());
 
-		for(auto const& point : pts)
+		for ( auto const &point : pts )
 		{
-			ptsx.emplace_back(point.x);
-			ptsy.emplace_back(point.y);
+			ptsx.emplace_back( point.x );
+			ptsy.emplace_back( point.y );
 		}
 
-		s.set_points(ptsx, ptsy);
+		s.set_points( ptsx, ptsy );
 	}
 
-	assert(m_Previous_path_y.size() == m_Previous_path_x.size());
+	assert( m_Previous_path_y.size() == m_Previous_path_x.size());
 
-	for(int i = 0; i < m_Previous_path_y.size(); ++i)
+	for ( int i = 0; i < m_Previous_path_y.size(); ++i )
 	{
-		retVal.m_X.emplace_back(m_Previous_path_x[i]);
-		retVal.m_Y.emplace_back(m_Previous_path_y[i]);
+		retVal.m_X.emplace_back( m_Previous_path_x[ i ] );
+		retVal.m_Y.emplace_back( m_Previous_path_y[ i ] );
 	}
 
 	double const target_x = 30.0;
-	double const target_y = s(target_x);
-	double const target_dist = sqrt((target_x*target_x) + (target_y * target_y));
+	double const target_y = s( target_x );
+	double const target_dist = sqrt((target_x * target_x) + (target_y * target_y));
 
-	double x_addon(0.0);
-	double const N = (target_dist / (0.02 * REF_VEL));
-	double const incFactor = (target_x)/N;
+	double x_addon( 0.0 );
+	double const N = (target_dist / (TIME_INTERVAL * targetSpeed));
+	double const incFactor = (target_x) / N;
 
-	for(int i = 0; i < MAX_PATH_POINTS - previous_path_len; ++i)
+	for ( int i = 0; i < MAX_PATH_POINTS - previous_path_len; ++i )
 	{
 		double x_point = x_addon + incFactor;
-		double y_point = s(x_point);
+		double y_point = s( x_point );
 
 		x_addon = x_point;
 
 		double const x_temp = x_point;
 		double const y_temp = y_point;
 
-		x_point = (x_temp * cos(ref_yaw) - y_temp * sin(ref_yaw));
-		y_point = (x_temp * sin(ref_yaw) + y_temp * cos(ref_yaw));
+		x_point = (x_temp * cos( ref_yaw ) - y_temp * sin( ref_yaw ));
+		y_point = (x_temp * sin( ref_yaw ) + y_temp * cos( ref_yaw ));
 
 		x_point += ref.x;
 		y_point += ref.y;
 
-		retVal.m_X.emplace_back(x_point);
-		retVal.m_Y.emplace_back(y_point);
+		retVal.m_X.emplace_back( x_point );
+		retVal.m_Y.emplace_back( y_point );
 	}
-
-
-
-//	double const dist_inc = MPH2MS * 49.0 * 0.02; // 50 MPH speed in 0.02 sec intervals
-//	for ( int i = 0; i < 50; i++ )
-//	{
-//		double const nextS = m_Car_s + ( dist_inc * i );
-//		double const nextD = m_Car_d;
-//		auto const XY = getXY( nextS, nextD, map_waypoints_s, map_waypoints_x, map_waypoints_y );
-//		retVal.m_X.emplace_back( XY[ 0 ] );
-//		retVal.m_Y.emplace_back( XY[ 1 ] );
-//	}
-
-//	static double const MAX_SPEED = 50.f * MPH2MS;
-//	static double const MAX_ACCEL = 10.f * MPH2MS;
-//
-//	double const carSpeedMS = m_Car_speed * MPH2MS;
-//	do
-// uble const T = 1; // second
-//	double const target_speed = min(MAX_SPEED, carSpeedMS + MAX_ACCEL);
-//
-//	//from v = u + at
-//	double const resultAccel = (target_speed - carSpeedMS) / T;
-//
-//	auto const size =  m_Previous_path_x.size();
-//	retVal.m_X = m_Previous_path_x;
-//	retVal.m_Y = m_Previous_path_y;
-//
-//	double lastS(m_Car_s);
-//	if(size > 0)
-//	{
-//		auto const lastSD = getFrenet(m_Previous_path_x.back(), m_Previous_path_y.back(), m_Car_yaw, map_waypoints_x, map_waypoints_y);
-//		lastS = lastSD[0];
-//	}
-//
-//	for(auto i = 0; i <= (51 - size); i++)
-//	{
-//		double const t = 0.02 * i;
-//		double const nextS = lastS + carSpeedMS * t + 0.5 * resultAccel * t * t;
-//		double const nextD = m_Car_d;
-//		auto const XY = getXY( nextS, nextD, map_waypoints_s, map_waypoints_x, map_waypoints_y );
-//		retVal.m_X.emplace_back( XY[ 0 ] );
-//		retVal.m_Y.emplace_back( XY[ 1 ] );
-//	}
-
-
-//	T_JMTParams start{m_Car_s, m_Car_speed * MPH2MS, m_Car_acceleration * MPH2MS};
-//	T_JMTParams end{m_Car_s + 200.f, 50.f * MPH2MS, 0.0};
-//	double const T(10);
-//
-//	auto const &PolynomialParameters = JMT( start, end, T );
-//
-//	for ( int i = 0; i < 50; i++ )
-//	{
-//		double const deltaTime = i * 0.02;
-//		double const nextS = PolynomialParameters[ 0 ] +
-//		                     PolynomialParameters[ 1 ] * deltaTime +
-//		                     PolynomialParameters[ 2 ] * pow( deltaTime, 2 ) +
-//		                     PolynomialParameters[ 3 ] * pow( deltaTime, 3 ) +
-//		                     PolynomialParameters[ 4 ] * pow( deltaTime, 4 ) +
-//		                     PolynomialParameters[ 5 ] * pow( deltaTime, 5 );
-//		double const nextD = m_Car_d;
-//		auto const XY = getXY( nextS, nextD, map_waypoints_s, map_waypoints_x, map_waypoints_y );
-//		retVal.m_X.emplace_back( XY[ 0 ] );
-//		retVal.m_Y.emplace_back( XY[ 1 ] );
-//	}
-
 
 	return retVal;
 }
 
-T_PolynomialParameters Planner::JMT(T_JMTParams const& start, T_JMTParams const& end, double const T)
+T_PolynomialParameters Planner::JMT( T_JMTParams const &start, T_JMTParams const &end, double const T )
 {
 	using namespace Eigen;
 	/*
