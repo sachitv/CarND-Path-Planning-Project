@@ -17,10 +17,11 @@
 
 static double const MPH2MS = 1600.f / 3600.f;
 
-static int const LANE = 1;
+//static int const LANE = 1;
 static double const MAX_VEL = 49.5f * MPH2MS;
 static int const MAX_PATH_POINTS = 50;
 static double const TIME_INTERVAL = 0.02;//sec
+static double const MAX_DBL = numeric_limits<double>::max();
 
 struct Point
 {
@@ -57,7 +58,12 @@ S_PlannerResult Planner::GetPath( T_MapPoints const &map_waypoints_x, T_MapPoint
 	static double targetSpeed = 0;
 	bool slowDown( false );
 	int const currentCarLane = (m_Car_d) / 4;
+	static int targetLane = currentCarLane;
+	static bool changingLane(false);
 	double minSpeed = MAX_VEL;
+	double minDistance = MAX_DBL;
+	static double changeD = 0;
+	static double targetD = currentCarLane * 4 + 2.f;
 
 	double mainCarPredictedPosition = m_Car_s;
 	if ( previous_path_len > 0 )
@@ -67,22 +73,25 @@ S_PlannerResult Planner::GetPath( T_MapPoints const &map_waypoints_x, T_MapPoint
 		mainCarPredictedPosition = lastPoint[ 0 ];
 	}
 
+	//Check if it is safe to enter any of these lanes. By Default true.
+	array<bool, 3> laneSafety = {true, true, true};
+	array<double, 3> laneDistance = {MAX_DBL, MAX_DBL, MAX_DBL};
+
 	for ( auto const &vehicleData : m_Sensor_fusion )
 	{
 		int const thisCarLane = (vehicleData.m_D / 4);
+		double const thisCarS = vehicleData.m_S;
+		double const thisCarSpeed = sqrt( pow( vehicleData.m_Vy, 2 ) + pow( vehicleData.m_Vx, 2 ));
+
+		double const thisCarProjectedDistance = previous_path_len * TIME_INTERVAL * thisCarSpeed;
+
+		double const distance = ( thisCarS + thisCarProjectedDistance ) - mainCarPredictedPosition;
 
 		if ( thisCarLane == currentCarLane )
 		{
 			//Car is in our lane
 
-			double const thisCarS = vehicleData.m_S;
-			double const thisCarSpeed = sqrt( pow( vehicleData.m_Vy, 2 ) + pow( vehicleData.m_Vx, 2 ));
-
-			double const thisCarProjectedDistance = previous_path_len * TIME_INTERVAL * thisCarSpeed;
-
-			double const distance = thisCarS + thisCarProjectedDistance - mainCarPredictedPosition;
-
-			static double const MIN_DIST = 30;
+			static double const MIN_DIST = 30.0;
 			if ( distance > 0 && distance < MIN_DIST ) //meters
 			{
 				//This car is ahead of us, slow our speed
@@ -90,19 +99,107 @@ S_PlannerResult Planner::GetPath( T_MapPoints const &map_waypoints_x, T_MapPoint
 				{
 					slowDown = true;
 					minSpeed = min( thisCarSpeed, minSpeed );
+					minDistance = min(minDistance, distance);
 				}
+			}
+		}
+		else
+		{
+			static double const MIN_BACK_DIST = -10.0;
+			static double const MIN_FORWARD_DIST = 50.0;
+			double const currentDistance = thisCarS - m_Car_s;
+			if( currentDistance > MIN_BACK_DIST && distance < MIN_FORWARD_DIST)
+			{
+				laneSafety[thisCarLane] = false;
+				laneDistance[thisCarLane] = min(laneDistance[thisCarLane], distance);
 			}
 		}
 	}
 
-	if ( slowDown && targetSpeed > (minSpeed - 5.0))
+	if ( slowDown && !changingLane )
 	{
-		targetSpeed -= 0.2 * MPH2MS;
+		//Check available lanes on the sides
+		int const leftLane = currentCarLane - 1;
+		int const rightLane = currentCarLane + 1;
+		if(leftLane >= 0 && laneSafety[leftLane])
+		{
+			//If the left lane is empty, choose it.
+			targetLane = leftLane;
+		}
+		if(rightLane <= 2 && laneSafety[rightLane])
+		{
+			//If the right lane is also empty, then check to see which is more open.
+			if(targetLane == leftLane)
+			{
+				//Go in the right lane if it is more open than the left lane
+				if(laneDistance[rightLane] > laneDistance[leftLane])
+				{
+					targetLane = rightLane;
+				}
+				//else, go to the left lane itself.
+			}
+			else
+			{
+				targetLane = rightLane;
+			}
+		}
+
+		//If there's less than NO_CHANGE_DISTANCE meters to the car ahead, don't change lanes
+		static double const NO_CHANGE_DISTANCE = 20;
+		static double const SLOW_DOWN_DIST = 30;
+		double const minPermittedSpeed = minSpeed - 5.0;
+
+		if(minDistance < NO_CHANGE_DISTANCE)
+		{
+			targetLane = currentCarLane;
+
+			if ( targetSpeed > minPermittedSpeed)
+			{
+				static double const HEAVY_BRAKE_AMOUNT = 0.3 * MPH2MS;
+				targetSpeed -= HEAVY_BRAKE_AMOUNT;
+			}
+		}
+		else if(minDistance < SLOW_DOWN_DIST)
+		{
+			if ( targetSpeed > minPermittedSpeed)
+			{
+				static double const LIGHT_BRAKE_AMOUNT = 0.12 * MPH2MS;
+				targetSpeed -= LIGHT_BRAKE_AMOUNT;
+			}
+		}
+
+		if(targetLane != currentCarLane)
+		{
+			changingLane = true;
+			changeD = ((double)(targetLane - currentCarLane)) / 10.f;
+		}
 	}
 	else if ( targetSpeed < MAX_VEL )
 	{
-		targetSpeed += 0.2 * MPH2MS;
+		static double const HEAVY_ACCEL_AMOUNT =  0.2 * MPH2MS;
+		targetSpeed += HEAVY_ACCEL_AMOUNT;
 	}
+
+	double const targetLaneCenter = targetLane * 4 + 2.f;
+	static double const THRESHOLD = 0.1;
+
+	targetD = targetD + changeD;
+	if(changeD > 0)
+	{
+		targetD = min(targetLaneCenter, targetD);
+	}
+	else
+	{
+		targetD = max(targetLaneCenter, targetD);
+	}
+
+	if(abs(m_Car_d - targetLaneCenter) < THRESHOLD)
+	{
+		changingLane = false;
+		targetD = targetLaneCenter;
+		changeD = 0.0;
+	}
+
 	targetSpeed = max( 0.0, min( MAX_VEL, targetSpeed ));
 
 	vector<Point> pts;
@@ -125,10 +222,10 @@ S_PlannerResult Planner::GetPath( T_MapPoints const &map_waypoints_x, T_MapPoint
 		pts.emplace_back( prev );
 		pts.emplace_back( ref );
 
-		cout << "ref" << endl;
-		ref.print();
-		cout << "prev" << endl;
-		prev.print();
+//		cout << "ref" << endl;
+//		ref.print();
+//		cout << "prev" << endl;
+//		prev.print();
 	}
 	else
 	{
@@ -147,23 +244,25 @@ S_PlannerResult Planner::GetPath( T_MapPoints const &map_waypoints_x, T_MapPoint
 		pts.emplace_back( prev );
 		pts.emplace_back( ref );
 
-		cout << "ref" << endl;
-		ref.print();
-		cout << "prev" << endl;
-		prev.print();
+//		cout << "ref" << endl;
+//		ref.print();
+//		cout << "prev" << endl;
+//		prev.print();
 	}
+
 
 	for ( int i = 0; i < 3; ++i )
 	{
 		static int const OFFSET = 30;
-		vector<double> const nextwp = getXY( m_Car_s + (OFFSET * (i + 1)), (2 + 4 * LANE), map_waypoints_s,
+//		vector<double> const nextwp = getXY( m_Car_s + (OFFSET * (i + 1)), (2 + 4 * targetLane), map_waypoints_s,
+//		                                     map_waypoints_x, map_waypoints_y );
+		vector<double> const nextwp = getXY( m_Car_s + (OFFSET * (i + 1)), targetD, map_waypoints_s,
 		                                     map_waypoints_x, map_waypoints_y );
 		Point const next( nextwp[ 0 ], nextwp[ 1 ] );
 		pts.emplace_back( next );
 
-		cout << "next waypoint" << endl;
-		next.print();
-
+//		cout << "next waypoint" << endl;
+//		next.print();
 	}
 
 	for ( int i = 0; i < pts.size(); ++i )
