@@ -25,7 +25,8 @@ struct S_PlannerResult
 class Planner
 {
 public:
-	Planner( double car_x, double car_y, double car_s, double car_d, double car_yaw, double car_speed, double car_acceleration,
+	Planner( double car_x, double car_y, double car_s, double car_d, double car_yaw, double car_speed,
+	         double car_acceleration,
 	         const T_PathPoints &previous_path_x, const T_PathPoints &previous_path_y, double end_path_s,
 	         double end_path_d, const T_SensorFusionDatas &sensor_fusion )
 			: m_Car_x( car_x )
@@ -34,7 +35,7 @@ public:
 			  , m_Car_d( car_d )
 			  , m_Car_yaw( car_yaw )
 			  , m_Car_speed( car_speed )
-			  , m_Car_acceleration(car_acceleration)
+			  , m_Car_acceleration( car_acceleration )
 			  , m_Previous_path_x( previous_path_x )
 			  , m_Previous_path_y( previous_path_y )
 			  , m_End_path_s( end_path_s )
@@ -44,7 +45,8 @@ public:
 	S_PlannerResult
 	GetPath( T_MapPoints const &map_waypoints_x, T_MapPoints const &map_waypoints_y, T_MapPoints const &map_waypoints_s,
 	         T_MapPoints const &map_waypoints_dx, T_MapPoints const &map_waypoints_dy );
-	T_PolynomialParameters JMT(T_JMTParams const& start, T_JMTParams const& end, double const T);
+
+	T_PolynomialParameters JMT( T_JMTParams const &start, T_JMTParams const &end, double const T );
 
 private:
 	double m_Car_x;
