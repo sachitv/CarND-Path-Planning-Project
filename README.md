@@ -1,7 +1,46 @@
 # CarND-Path-Planning-Project
 Self-Driving Car Engineer Nanodegree Program
-   
-### Simulator. You can download the Term3 Simulator BETA which contains the Path Planning Project from the [releases tab](https://github.com/udacity/self-driving-car-sim/releases).
+
+## Project Reflection
+I created a planner class that decides how to plan the course of the vehicle we are driving. It consists of two parts, the General Path Creation part and the Collision Avoidance part. Although it is the latter that feeds the former, I am going to go review them in reverse for better understanding. This is then followed by a link to the video.
+
+### General Path Creation
+1. If there are previous points in the list, add them all back to the current list of points we have to traverse.
+2. For the remaining points (We can have up to 50)
+  - Generate 3 spline points based on the reference point of the vehicle. If there are no points, use the current position of the vehicle. If there are previous points, use the last position amongst them
+  - These spline points are generated at distances of 30, 60 and 90 m away from the reference point of the vehicle.
+  - Convert the spline points to xy points in the space of the car and sort them in ascending order of X
+  - Generate x & y points based on the target_x (30 m) and target_y (from spline) distances for time intervals of TIME_INTERVAL(0.02 s) at the targetSpeed (varies)
+  - Convert these points back to world space and add them to the list of points
+
+### Collision Avoidance
+1. Make two lists
+  - One that tells us whether lanes are safe to enter (laneSafety) - array<bool, 3>
+  - Another that tells us how far the next car is in that lane (laneDistance) - array<double, 3>
+2. For Each Vehicle in the Sensor Fusion Data:
+  - Calculate it's projected distance and current distance from the controlled vehicle.
+  - If this vehicle is in the current lane :
+    - If it falls within a certain threshold between 0m and MIN_DIST(30 m) then mark a flag slowDown. 
+  - Else
+    - If it is less than MIN_BACK_DIST (10 m) behind our main vehicle and less than MIN_FORWARD_DIST (50m) ahead of both the projected and current distance then mark this lane as unsafe
+    - Set the distance for the lane
+    - In some cases s and d might fail, so fallback to x-y distance in order to avoid such pit falls.
+3. If we are slowing down and not changing lanes yet :
+  - Check the left lane and right lanes for safety and choose the one where the next car is the farthest out.
+  - If we are NO_CHANGE_DISTANCE (10 m) behind the vehicle in front of us in the lane then brake hard (0.3 mph reduction in our target speed).
+  - Else if we are SLOW_DOWN_DIST (30 m) behind the vehicle in front of us in the lane then brake gently (0.1 mph reduction in our current speed).
+  - If we have an order to change lanes then set the change lanes flag and calculate the delta shift (changeD).
+4. Else if we are slowing down and changing lanes :
+  - If we are SLOW_DOWN_DIST (5m) away from a vehicle in our current lane then hit the brakes with HEAVY_BRAKE_AMOUNT (0.2 mph).
+5. Else if target speed is less than max velocity, increase velocity with HEAVY_ACCEL_AMOUNT(0.2 mph).
+6. Set the targetD and targetSpeed values based on the decisions taken above and send them to the path creation module.
+
+### Runtime Video
+Please find the video at [https://youtu.be/4IRv2u6lKxI](https://youtu.be/4IRv2u6lKxI).
+
+
+### Simulator. 
+You can download the Term3 Simulator BETA which contains the Path Planning Project from the [releases tab](https://github.com/udacity/self-driving-car-sim/releases).
 
 In this project your goal is to safely navigate around a virtual highway with other traffic that is driving +-10 MPH of the 50 MPH speed limit. You will be provided the car's localization and sensor fusion data, there is also a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too. The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another. The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop. Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 50 m/s^3.
 
